@@ -1,9 +1,9 @@
 /* ==========================================================
    BIBLIOLED ITEMS
    Integração de recursos digitais BiblioLED no OPAC RBMO
-   Autor: Miguel Mimoso Correia
    Versão: 1.0
-
+   Autor: Miguel Mimoso Correia
+   
    ==========================================================
    OBJETIVO
    ==========================================================
