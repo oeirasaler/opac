@@ -2,7 +2,6 @@
    OPAC_SUBJECT_RECOMMENDATIONS
    Versão 1.0
    Autor: Miguel Mimoso Correia
-   Licença: CC-BY-NC-SA
 
    Finalidade
    ----------
