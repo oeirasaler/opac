@@ -67,15 +67,28 @@
   const cacheLabels = new Map();
   const cacheWikipedia = new Map();
 
-  document.addEventListener('DOMContentLoaded', function () {
-    setTimeout(initAutoridataBox, 900);
-  });
+  // Inicializar mesmo quando o ficheiro é carregado depois de DOMContentLoaded.
+  function arrancarAutoridataBox() {
+    setTimeout(function () {
+      initAutoridataBox().catch(function (erro) {
+        console.error('[Authority BOX] Falha na inicialização:', erro);
+      });
+    }, 500);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', arrancarAutoridataBox, { once: true });
+  } else {
+    arrancarAutoridataBox();
+  }
 
   async function initAutoridataBox() {
     if (!location.href.includes('opac-detail.pl')) return;
 
     const autores = recolherAutores();
-    if (!autores.length) return;
+    if (!autores.length) {
+      console.warn('[Authority BOX] Nenhum autor encontrado no detalhe bibliográfico.');
+      return;
+    }
 
     criarCaixa();
 
@@ -83,7 +96,7 @@
     let encontrados = 0;
 
     for (const autor of autores.slice(0, CONFIG.maxAutoridades)) {
-      const qid = await obterQID(autor.authid);
+      const qid = autor.authid ? await obterQID(autor.authid) : null;
 
       if (qid && qidsMostrados.has(qid)) continue;
       if (qid) qidsMostrados.add(qid);
@@ -117,13 +130,13 @@
       const label = mapearLabel(celulas[0].textContent);
       if (!CONFIG.camposValidos.includes(label)) return;
 
-      const links = Array.from(celulas[1].querySelectorAll('a[href*="opac-search.pl"][href*="q="]'));
+      const links = Array.from(celulas[1].querySelectorAll('a[href*="opac-search.pl"], a[href*="opac-authoritiesdetail.pl"]'));
 
       links.forEach(function (a) {
         const texto = limparTexto(a.textContent);
         const authid = extrairAuthId(a.href);
 
-        if (!texto || !authid) return;
+        if (!texto) return;
 
         autores.push({
           nome: limparNomeAutor(texto),
@@ -137,14 +150,14 @@
 
     if (!autores.length) {
       const links = Array.from(
-        document.querySelectorAll('a[href*="opac-search.pl"][href*="q="]')
+        document.querySelectorAll('a[href*="opac-search.pl"], a[href*="opac-authoritiesdetail.pl"]')
       );
 
       links.forEach(function (a) {
         const texto = limparTexto(a.textContent);
         const authid = extrairAuthId(a.href);
 
-        if (!texto || !authid) return;
+        if (!texto) return;
 
         const contexto = obterContextoDoLink(a);
         const label = obterLabelDoLink(a, contexto);
@@ -164,13 +177,26 @@
       });
     }
 
-    return autores
-      .filter(function (a) {
-        return a.nome && a.authid;
-      })
+    // Koha pode apresentar a descrição bibliográfica em blocos .results_summary,
+    // sem uma tabela e sem identificador de autoridade no URL.
+    document.querySelectorAll('.results_summary, dl, .biblio-details').forEach(function (bloco) {
+      const texto = limparTexto(bloco.textContent);
+      const labelEl = bloco.querySelector('.label, dt, th');
+      const label = labelEl ? mapearLabel(labelEl.textContent) : mapearLabel(texto);
+      if (!CONFIG.camposValidos.includes(label)) return;
+      bloco.querySelectorAll('a[href*="opac-search.pl"], a[href*="opac-authoritiesdetail.pl"]').forEach(function (a) {
+        const nome = limparTexto(a.textContent);
+        if (!nome) return;
+        autores.push({ nome: limparNomeAutor(nome), nomeOriginal: nome,
+          href: a.href, authid: extrairAuthId(a.href),
+          papeis: extrairPapeisDoTexto(nome, label) });
+      });
+    });
+
+    return autores.filter(function (a) { return !!a.nome; })
       .filter(function (a, i, arr) {
         return arr.findIndex(function (b) {
-          return b.authid === a.authid;
+          return a.authid && b.authid ? b.authid === a.authid : b.nome === a.nome;
         }) === i;
       });
   }
@@ -289,23 +315,17 @@
   function extrairAuthId(url) {
     try {
       const u = new URL(url, location.origin);
-
-      if (u.searchParams.get('authid')) {
-        return u.searchParams.get('authid');
-      }
-
-      if (u.searchParams.get('q')) {
-        return u.searchParams.get('q');
-      }
-
-      return null;
+      const direto = u.searchParams.get('authid');
+      if (direto && /^\d+$/.test(direto)) return direto;
+      const q = u.searchParams.get('q') || '';
+      if (/^\d+$/.test(q)) return q;
+      const indice = u.searchParams.get('idx') || '';
+      const match = q.match(/^(?:an|an,ext|authid):?\s*(\d+)$/i);
+      if (match) return match[1];
+      if (/^an(?:,ext)?$/i.test(indice) && /^\d+$/.test(q)) return q;
+      return null; // Uma pesquisa textual por autor não é um authid.
     } catch (e) {
-      const m =
-        url.match(/[?&]authid=(\d+)/i) ||
-        url.match(/[?&]q=(\d+)/i) ||
-        url.match(/an:(\d+)/i);
-
-      return m ? m[1] : null;
+      return null;
     }
   }
 
